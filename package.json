@@ -1,0 +1,14 @@
+{
+  "name": "movi-merge",
+  "version": "0.0.1",
+  "description": "extract ISEE info from movements",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "string-format": "^0.5.0"
+  }
+}
