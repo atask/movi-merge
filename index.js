@@ -1,9 +1,10 @@
 var fs = require('fs'),
     path = require('path'),
-    format = require('string-format');
+    format = require('string-format'),
+    chokidar = require('chokidar'),
+    readline = require('readline');
 
 var baseDir = path.join(__dirname, 'res'),
-    outPath = path.join(baseDir, 'out.csv'),
     dataRe = /\d{2}\/\d{2}\/\d{4}\n\d{2}\/\d{2}\/\d{4}\n.*\n.*\n.*\n.*\n.*\n\nstampa/g,
     columnRe = /\d{2}\/\d{2}\/\d{4}\n\d{2}\/\d{2}\/\d{4}\n.*\n(.*)\n(.*)\n.*\nDescrizione: (.*) - Saldo Contabile: (.*) - Data Contabile: (.*) - Data Valuta: (.*)\n/,
     //header = ['Data contabile', 'Data valuta', 'Descrizione', 'Causale', 'Importo', 'Saldo contabile'],
@@ -12,30 +13,48 @@ var baseDir = path.join(__dirname, 'res'),
     pageCount, quarterCount, pageTotal, pageData, rowCount, rowTotal,
     rowData, accountingDate, valueDate, description, action, amount, balance;
 
-// create the out file...
-fs.writeFileSync(outPath, format.apply(null, [csvTemplate].concat(header)), { encoding: 'utf8' });
-// for each quarter, do the magic...
-for (quarterCount = 0; quarterCount < 4; quarterCount += 1) {
-    // see how many pages we have to read
-    var quarterDir = path.join(baseDir, 't' + (quarterCount + 1));
-    pageTotal = fs.readdirSync(quarterDir).length;
-    // get data from each page
-    for (pageCount = 0; pageCount < pageTotal; pageCount += 1) {
-        pagePath = path.join(quarterDir, (pageCount + 1) + '.txt');
-        pageData = fs.readFileSync(pagePath, 'UTF-8');
-        // get the data rows out... 
-        pageData = pageData.match(dataRe);
+watcher = chokidar.watch(baseDir, {ignored: /\.csv$/});
+
+watcher
+    .on('ready', function() {console.info('Initial scan complete. Ready for changes.')})
+    .on('add', convertFile)
+    .on('change', convertFile);
+
+function convertFile(filePath) {
+    // create the out file...
+    var fileName = path.basename(filePath),
+        fileExt = path.extname(fileName),
+        outFileName = path.basename(filePath, fileExt) + '.csv',
+        outPath = path.join(baseDir, outFileName);
+    // get the data rows out... 
+    pageData = fs.readFileSync(filePath, 'UTF-8');
+    pageData = pageData.match(dataRe);
+    if (pageData !== null) {
+        fs.writeFileSync(outPath, format.apply(null, [csvTemplate].concat(header)), { encoding: 'utf8' });
         pageData.forEach(function extractFromRow(row) {
             rowData = row.match(columnRe);
-            accountingDate = rowData[5];
-            valueDate = rowData[6];
-            description = rowData[3];
-            action = rowData[1];
-            amount = rowData[2];
-            balance = rowData[4];
-            console.log('row parsed');
             fs.appendFileSync(outPath, format.apply(null, [csvTemplate].concat(rowData)), { encoding: 'utf8' });
         });
+        console.info(format('Converted: {0} -> {1}', fileName, outFileName));
+    } else {
+        console.info(format('{} had no entries... Wrong format?', fileName));
     }
 }
-console.log('DONE!');
+
+// detect when quitting with CTRL-C
+if (process.platform === "win32") {
+    var rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    rl.on('SIGNIT', function() {
+        process.emit('SIGINT');
+    });
+}
+
+process.on('SIGINT', function() {
+    // wrap it up and exit
+    console.info('Exiting...');
+    watcher.close();
+    process.exit();
+});
