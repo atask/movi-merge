@@ -3,19 +3,17 @@ var fs = require('fs'),
     format = require('string-format');
 
 var baseDir = path.join(__dirname, 'res'),
-    dataRe = /cphContenuto_grdMovimenti.Data = \[(.*)\];/,
-    columnReTemplate = '{}=([^;]*);',
-    fields = ['Data contabile', 'Data valuta', 'Descrizione', 'Causale', 'Importo', 'Saldo contabile'],
-    fieldsRe,
+    outPath = path.join(baseDir, 'out.csv'),
+    dataRe = /\d{2}\/\d{2}\/\d{4}\n\d{2}\/\d{2}\/\d{4}\n.*\n.*\n.*\n.*\n.*\n\nstampa/g,
+    columnRe = /\d{2}\/\d{2}\/\d{4}\n\d{2}\/\d{2}\/\d{4}\n.*\n(.*)\n(.*)\n.*\nDescrizione: (.*) - Saldo Contabile: (.*) - Data Contabile: (.*) - Data Valuta: (.*)\n/,
+    //header = ['Data contabile', 'Data valuta', 'Descrizione', 'Causale', 'Importo', 'Saldo contabile'],
+    header = ['DUMMY', 'Causale', 'Importo', 'descrizione', 'Saldo contabile', 'Data contabile', 'Data valuta'],
+    csvTemplate = '{5}${6}${3}${1}${2}${4}\n',
     pageCount, quarterCount, pageTotal, pageData, rowCount, rowTotal,
     rowData, accountingDate, valueDate, description, action, amount, balance;
 
-
-// generate all regexes
-fieldsRe = fields.map(function createRe(field) {
-    return new RegExp(format(columnReTemplate, field));
-});
-
+// create the out file...
+fs.writeFileSync(outPath, format.apply(null, [csvTemplate].concat(header)), { encoding: 'utf8' });
 // for each quarter, do the magic...
 for (quarterCount = 0; quarterCount < 4; quarterCount += 1) {
     // see how many pages we have to read
@@ -23,25 +21,21 @@ for (quarterCount = 0; quarterCount < 4; quarterCount += 1) {
     pageTotal = fs.readdirSync(quarterDir).length;
     // get data from each page
     for (pageCount = 0; pageCount < pageTotal; pageCount += 1) {
-        pagePath = path.join(quarterDir, 'Movimenti' + (pageCount + 1) + '.html');
+        pagePath = path.join(quarterDir, (pageCount + 1) + '.txt');
         pageData = fs.readFileSync(pagePath, 'UTF-8');
-        // get the data array out... hope eval doesn't brake anything
-        pageData = pageData.match(dataRe)[1];
-        pageData = eval('[' + pageData + ']');
-        rowTotal = pageData.length;
-        for (rowCount = 0; rowCount < rowTotal; rowCount += 1) {
-             // eighth column has all the goodness
-             rowData = pageData[rowCount][8];
-             // add a semicolon so regex won't blow
-             rowData = rowData.concat(';');
-             // create a csv row
-             var csvRow = '';
-             fieldsRe.forEach(function extractData(regex) {
-                 csvRow = csvRow.concat(format('"{}",', rowData.match(regex)[1]));
-             });
-             // clean '&#xx' symbols
-             // append to csvfile
-             console.log(csvRow);
-        }
+        // get the data rows out... 
+        pageData = pageData.match(dataRe);
+        pageData.forEach(function extractFromRow(row) {
+            rowData = row.match(columnRe);
+            accountingDate = rowData[5];
+            valueDate = rowData[6];
+            description = rowData[3];
+            action = rowData[1];
+            amount = rowData[2];
+            balance = rowData[4];
+            console.log('row parsed');
+            fs.appendFileSync(outPath, format.apply(null, [csvTemplate].concat(rowData)), { encoding: 'utf8' });
+        });
     }
 }
+console.log('DONE!');
