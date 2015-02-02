@@ -6,7 +6,7 @@ var fs = require('fs'),
     moment = require('moment'),
     copypaste = require('copy-paste');
 
-var baseDir = path.join(__dirname, 'res'),
+var outFile = path.join(__dirname, 'out.csv'),
     dataRe = /\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}\s+.+\s+.+\s+.+\s+.+\s+stampa/g,
     columnRe = /\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}\s+.*\s+(.*)\s+(.*)\s+.*\s+Descrizione: (.*) - Saldo Contabile: (.*) - Data Contabile: (.*) - Data Valuta: (.*)\s+/,
     dateFormat = 'DD/MM/YYYY',
@@ -14,10 +14,7 @@ var baseDir = path.join(__dirname, 'res'),
     movements = [],
     // index of movement hashes
     movementIndex = {},
-    header = ['DUMMY', 'Causale', 'Importo', 'descrizione', 'Saldo contabile', 'Data contabile', 'Data valuta'],
-    csvTemplate = '{5},{6},"{3}","{1}",{2},{4}\n',
-    pageCount, quarterCount, pageTotal, pageData, rowCount, rowTotal,
-    rowData, accountingDate, valueDate, description, action, amount, balance;
+    csvHeader = '"Data contabile","Data valuta","Descrizione","Causale","Importo","Saldo contabile"\n';
 
 function parseClipboard(err, data) {
     var pageData = data.match(dataRe);
@@ -38,7 +35,7 @@ function parseClipboard(err, data) {
             console.info(format('\t{}: {}', movement.accountingDate.format(dateFormat), movement.action));
         });
     } else {
-        console.info(format('{} had no entries... Wrong format?', fileName));
+        console.info('No entries found in clipboard...');
     }
 }
 
@@ -58,8 +55,19 @@ function parseMovement(reResult) {
 
         toHash: function() {
             return crypto.createHash('md5').update(JSON.stringify(this)).digest('hex');
+        },
+
+        toCSV: function() {
+            return format('{accountingDate},{valueDate},"{description}","{action}",{amount},{balance}\n', this);
         }
     };
+}
+
+function writeCsv(outPath) {
+    fs.writeFileSync(outPath, csvHeader, { encoding: 'utf8' });
+    movements.forEach(function appendMovement(movement) {
+        fs.appendFileSync(outPath, movement.toCSV(), { encoding: 'utf8' });
+    });
 }
 
 // detect clipboard data on 'Z' press
@@ -68,25 +76,18 @@ stdin.setRawMode( true );
 stdin.resume();
 stdin.setEncoding('utf8');
 stdin.on('data', function(key) {
-    if (key === 'z') {
-        copypaste.paste(parseClipboard);
+    switch (key) {
+        case 'v':
+            copypaste.paste(parseClipboard);
+            break;
+
+        case 'd':
+            writeCsv(outFile);
+            console.info(format('{} movements written to {}', movements.length, outFile);
+
+        case 'q':
+            console.info('Quitting...');
+            process.exit();
+            break;
     }
-});
-
-// detect when quitting with CTRL-C
-if (process.platform === "win32") {
-    var rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
-    rl.on('SIGNIT', function() {
-        process.emit('SIGINT');
-    });
-}
-
-process.on('SIGINT', function() {
-    // wrap it up and exit
-    console.info('Exiting...');
-    watcher.close();
-    process.exit();
 });
