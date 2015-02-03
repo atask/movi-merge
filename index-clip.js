@@ -10,9 +10,10 @@ var fs = require('fs'),
 var outFile = path.join(__dirname, 'out.csv'),
     dataRe = /\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}\s+.+\s+.+\s+.+\s+.+\s+stampa/g,
     columnRe = /\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}\s+.*\s+(.*)\s+(.*)\s+.*\s+Descrizione: (.*) - Saldo Contabile: (.*) - Data Contabile: (.*) - Data Valuta: (.*)\s+/,
-    csvRe = /(.*),(.*),"(.*)","(.*)",(.*),(.*),"(.*)"/,
+    csvRe = /(.*)\t(.*)\t"(.*)"\t"(.*)"\t(.*)\t(.*)\t"(.*)"/,
     dateFormatIng = 'DD/MM/YYYY',
-    dateFormatCsv = 'MM/DD/YYYY',
+    dateFormatCsv = 'DD/MM/YYYY',
+    decimalSeparator = ',',
     // array holding all movements
     movements = [],
     // index of movement hashes
@@ -63,8 +64,8 @@ function parseCsvMovement(row) {
         description: data[3],
         action: data[4],
         // TODO: try to workout globalize.js for number editing
-        amount: parseFloat(data[5]),
-        balance: parseFloat(data[6]),
+        amount: parseFloat(data[5].replace(decimalSeparator, '.')),
+        balance: parseFloat(data[6].replace(decimalSeparator, '.'),
         hash: data[7]
     };
 }
@@ -75,17 +76,39 @@ function getMovementHash(movement) {
 
 function getMovementCsv(movement) {
     var csvAccountingDate = movement.accountingDate.format(dateFormatCsv),
-        csvValueDate = movement.valueDate.format(dateFormatCsv),
+        csvValueDate = movement.valueDate.format(dateFormatCsv)
+        csvAmount = movement.amount.toString().replace('.', decimalSeparator),
+        csvBalance = movement.balance.toString().replace('.', decimalSeparator),
+        csvDescription = sanitizeCsvString(movement.description),
         hash = getMovementHash(movement),
-        csvTemplate = '{1},{2},"{0.description}","{0.action}",{0.amount},{0.balance},"{3}"\n';
-    return format(csvTemplate, movement, csvAccountingDate, csvValueDate, hash);
+        csvTemplate = '{}\t{}\t"{}"\t"{}"\t{}\t{}\t"{}"\n';
+    return format(csvTemplate, csvAccountingDate, csvValueDate, csvDescription, movement.action, csvAmount, csvBalance, hash);
+}
+
+function sanitizeCsvString(string) {
+    var sanitized = string,
+        pos = sanitized.lastIndexOf('"');
+    while (pos != -1) {
+        // if " is first character or single, double it
+        if(pos === 0 || sanitized.charAt(pos - 1) === '"') {
+            sanitized = sanitized.substring(0, pos) + '"' + sanitized.substring(pos);
+        }
+        pos = sanitized.lastIndexOf('"', pos - 1);
+    }
+    return sanitized;
 }
 
 function writeCsv(outPath) {
     fs.writeFileSync(outPath, csvHeader, { encoding: 'utf8' });
     // order movements by accounting date
     movements.sort(function compareMovements(movement, otherMovement) {
-        return movement.accountingDate.isBefore(otherMovement.accountingDate) ? -1 : 1;
+        var date = movement.accountingDate,
+            otherDate = otherMovement.accountingDate;
+        // don't touch anything if dates are equal
+        if date.isSame(otherDate) {
+            return 0;
+        }
+        return date.isBefore(otherDate) ? -1 : 1;
     });
     movements.forEach(function appendMovement(movement) {
         fs.appendFileSync(outPath, getMovementCsv(movement), { encoding: 'utf8' });
