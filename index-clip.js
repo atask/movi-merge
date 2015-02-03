@@ -4,12 +4,15 @@ var fs = require('fs'),
     format = require('string-format'),
     readline = require('readline'),
     moment = require('moment'),
-    copypaste = require('copy-paste');
+    copypaste = require('copy-paste'),
+    linebyline = require('linebyline');
 
 var outFile = path.join(__dirname, 'out.csv'),
     dataRe = /\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}\s+.+\s+.+\s+.+\s+.+\s+stampa/g,
     columnRe = /\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}\s+.*\s+(.*)\s+(.*)\s+.*\s+Descrizione: (.*) - Saldo Contabile: (.*) - Data Contabile: (.*) - Data Valuta: (.*)\s+/,
-    dateFormat = 'DD/MM/YYYY',
+    csvRe = /(.*),(.*),"(.*)","(.*)",(.*),(.*),"(.*)"/,
+    dateFormatIng = 'DD/MM/YYYY',
+    dateFormatCsv = 'MM/DD/YYYY',
     // array holding all movements
     movements = [],
     // index of movement hashes
@@ -21,8 +24,8 @@ function parseClipboard(err, data) {
     if (pageData !== null) {
         var addedMovements = [];
         pageData.forEach(function extractFromRow(row) {
-            var movement = parseMovement(row.match(columnRe)),
-                hash = movement.toHash();
+            var movement = parseIngMovement(row),
+                hash = getMovementHash(movement);
             // add movement if not already stored
             if(!(hash in movementIndex)) {
                 movements.push(movement);
@@ -32,62 +35,103 @@ function parseClipboard(err, data) {
         });
         console.info(format('Found {} entries -> Added {} new', pageData.length, addedMovements.length));
         addedMovements.forEach(function printMovement(movement) {
-            console.info(format('\t{}: {}', movement.accountingDate.format(dateFormat), movement.action));
+            console.info(format('\t{}: {}', movement.accountingDate.format(dateFormatIng), movement.action));
         });
     } else {
         console.info('No entries found in clipboard...');
     }
 }
 
-function parseMovement(reResult) {
+function parseIngMovement(row) {
+    var data = row.match(columnRe);
     return {
-        accountingDate: moment(reResult[5], dateFormat),
-        valueDate: moment(reResult[6], dateFormat),
-        description: reResult[3],
-        action: reResult[1],
-        // TODO: try and workout globalize.js for number editing
-        amount: parseFloat(reResult[2].replace(',','.')),
-        balance: parseFloat(reResult[4].replace(',','.')),
-
-        toString: function() {
-            return JSON.stringify(this);
-        },
-
-        toHash: function() {
-            return crypto.createHash('md5').update(JSON.stringify(this)).digest('hex');
-        },
-
-        toCSV: function() {
-            return format('{accountingDate},{valueDate},"{description}","{action}",{amount},{balance}\n', this);
-        }
+        accountingDate: moment(data[5], dateFormatIng),
+        valueDate: moment(data[6], dateFormatIng),
+        description: data[3],
+        action: data[1],
+        // TODO: try to workout globalize.js for number editing
+        amount: parseFloat(data[2].replace(',','.')),
+        balance: parseFloat(data[4].replace(',','.'))
     };
+}
+
+function parseCsvMovement(row) {
+    var data = row.match(csvRe);
+    return {
+        accountingDate: moment(data[1], dateFormatCsv),
+        valueDate: moment(data[2], dateFormatCsv),
+        description: data[3],
+        action: data[4],
+        // TODO: try to workout globalize.js for number editing
+        amount: parseFloat(data[5]),
+        balance: parseFloat(data[6]),
+        hash: data[7]
+    };
+}
+
+function getMovementHash(movement) {
+    return crypto.createHash('md5').update(JSON.stringify(movement)).digest('hex');
+}
+
+function getMovementCsv(movement) {
+    var csvAccountingDate = movement.accountingDate.format(dateFormatCsv),
+        csvValueDate = movement.valueDate.format(dateFormatCsv),
+        hash = getMovementHash(movement),
+        csvTemplate = '{1},{2},"{0.description}","{0.action}",{0.amount},{0.balance},"{3}"\n';
+    return format(csvTemplate, movement, csvAccountingDate, csvValueDate, hash);
 }
 
 function writeCsv(outPath) {
     fs.writeFileSync(outPath, csvHeader, { encoding: 'utf8' });
+    // order movements by accounting date
+    movements.sort(function compareMovements(movement, otherMovement) {
+        return movement.accountingDate.isBefore(otherMovement.accountingDate) ? -1 : 1;
+    });
     movements.forEach(function appendMovement(movement) {
-        fs.appendFileSync(outPath, movement.toCSV(), { encoding: 'utf8' });
+        fs.appendFileSync(outPath, getMovementCsv(movement), { encoding: 'utf8' });
     });
 }
 
-// detect clipboard data on 'Z' press
-var stdin = process.stdin;
-stdin.setRawMode( true );
-stdin.resume();
-stdin.setEncoding('utf8');
-stdin.on('data', function(key) {
-    switch (key) {
-        case 'v':
-            copypaste.paste(parseClipboard);
-            break;
+function readCSV(inPath, callback) {
+    var csv = linebyline(inPath);
+        headerRead = false;
+    csv.on('line', function parseLine(line) {
+        // skip first line
+        if (headerRead === false) {
+            headerRead = true;
+        } else {
+            var movement = parseCsvMovement(line);
+            movements.push(movement);
+            movementIndex[movement.hash] = true;
+        }
+    });
+    csv.on('error', callback);
+    csv.on('end', callback);
+}
 
-        case 'd':
-            writeCsv(outFile);
-            console.info(format('{} movements written to {}', movements.length, outFile);
+function enableInput() {
+    // detect clipboard data on 'Z' press
+    var stdin = process.stdin;
+    stdin.setRawMode( true );
+    stdin.resume();
+    stdin.setEncoding('utf8');
+    stdin.on('data', function(key) {
+        switch (key) {
+            case 'v':
+                copypaste.paste(parseClipboard);
+                break;
 
-        case 'q':
-            console.info('Quitting...');
-            process.exit();
-            break;
-    }
-});
+            case 'd':
+                writeCsv(outFile);
+                console.info(format('{} movements written to {}', movements.length, outFile));
+                break;
+
+            case 'q':
+                console.info('Quitting...');
+                process.exit();
+                break;
+        }
+    });
+}
+
+readCSV(outFile, enableInput);
