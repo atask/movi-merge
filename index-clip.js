@@ -9,7 +9,7 @@ var fs = require('fs'),
 
 var outFile = path.join(__dirname, 'out.csv'),
     dataRe = /\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}\s+.+\s+.+\s+.+\s+.+\s+stampa/g,
-    columnRe = /\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}\s+.*\s+(.*)\s+(.*)\s+.*\s+Descrizione: (.*) - Saldo Contabile: (.*) - Data Contabile: (.*) - Data Valuta: (.*)\s+/,
+    columnRe = /\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}\s+.*\s+(.*)\s+(.*)\s+(.*)\s+Descrizione: (.*) - Saldo Contabile: (.*) - Data Contabile: (.*) - Data Valuta: (.*)\s+/,
     csvRe = /(.*)\t(.*)\t"(.*)"\t"(.*)"\t(.*)\t(.*)\t"(.*)"/,
     dateFormatIng = 'DD/MM/YYYY',
     dateFormatCsv = 'DD/MM/YYYY',
@@ -18,7 +18,7 @@ var outFile = path.join(__dirname, 'out.csv'),
     movements = [],
     // index of movement hashes
     movementIndex = {},
-    csvHeader = '"Data contabile","Data valuta","Descrizione","Causale","Importo","Saldo contabile"\n';
+    csvHeader = '"Data contabile"\t"Data valuta"\t"Descrizione"\t"Causale"\t"Importo"\t"Saldo contabile"\n';
 
 function parseClipboard(err, data) {
     var pageData = data.match(dataRe);
@@ -44,15 +44,19 @@ function parseClipboard(err, data) {
 }
 
 function parseIngMovement(row) {
-    var data = row.match(columnRe);
+    var data = row.match(columnRe),
+        // TODO: looks like '.' is a thousand separator after all... get it managed 
+        amount = (data[1] === 'ACCR. STIPENDIO-PENSIONE' || data[1] === 'ACCREDITO BONIFICO') ?
+                 parseFloat(data[3].replace(',','.')) :
+                 parseFloat(data[2].replace(',','.'));
     return {
-        accountingDate: moment(data[5], dateFormatIng),
-        valueDate: moment(data[6], dateFormatIng),
-        description: data[3],
+        accountingDate: moment(data[6], dateFormatIng),
+        valueDate: moment(data[7], dateFormatIng),
+        description: data[4],
         action: data[1],
         // TODO: try to workout globalize.js for number editing
-        amount: parseFloat(data[2].replace(',','.')),
-        balance: parseFloat(data[4].replace(',','.'))
+        amount: amount,
+        balance: parseFloat(data[5].replace(',','.'))
     };
 }
 
@@ -65,7 +69,7 @@ function parseCsvMovement(row) {
         action: data[4],
         // TODO: try to workout globalize.js for number editing
         amount: parseFloat(data[5].replace(decimalSeparator, '.')),
-        balance: parseFloat(data[6].replace(decimalSeparator, '.'),
+        balance: parseFloat(data[6].replace(decimalSeparator, '.')),
         hash: data[7]
     };
 }
@@ -105,7 +109,7 @@ function writeCsv(outPath) {
         var date = movement.accountingDate,
             otherDate = otherMovement.accountingDate;
         // don't touch anything if dates are equal
-        if date.isSame(otherDate) {
+        if (date.isSame(otherDate)) {
             return 0;
         }
         return date.isBefore(otherDate) ? -1 : 1;
