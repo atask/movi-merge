@@ -8,8 +8,8 @@ var fs = require('fs'),
     linebyline = require('linebyline');
 
 var outFile = path.join(__dirname, 'out.csv'),
-    dataRe = /\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}\s+.+\s+.+\s+.+\s+.+\s+stampa/g,
-    columnRe = /\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}\s+.*\s+(.*)\s+(.*)\s+(.*)\s+Descrizione: (.*) - Saldo Contabile: (.*) - Data Contabile: (.*) - Data Valuta: (.*)\s+/,
+    dataRe = /\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}\s+.+\s+.+\s+.+\s+.+\s+/g,
+    columnRe = /\d{2}\/\d{2}\/\d{4}\s+\d{2}\/\d{2}\/\d{4}\s+.*\s+(.*)\s+(.*)\s+Descrizione: (.*) - Saldo Contabile: (.*) - Data Contabile: (.*) - Data Valuta: (.*)\s+/,
     csvRe = /(.*)\t(.*)\t"(.*)"\t"(.*)"\t(.*)\t(.*)\t"(.*)"/,
     dateFormatIng = 'DD/MM/YYYY',
     dateFormatCsv = 'DD/MM/YYYY',
@@ -44,20 +44,20 @@ function parseClipboard(err, data) {
 }
 
 function parseIngMovement(row) {
-    var data = row.match(columnRe),
-        // TODO: looks like '.' is a thousand separator after all... get it managed 
-        amount = (data[1] === 'ACCR. STIPENDIO-PENSIONE' || data[1] === 'ACCREDITO BONIFICO') ?
-                 parseFloat(data[3].replace(',','.')) :
-                 parseFloat(data[2].replace(',','.'));
+    var data = row.match(columnRe);
     return {
-        accountingDate: moment(data[6], dateFormatIng),
-        valueDate: moment(data[7], dateFormatIng),
-        description: data[4],
+        accountingDate: moment(data[5], dateFormatIng),
+        valueDate: moment(data[6], dateFormatIng),
+        description: data[3],
         action: data[1],
         // TODO: try to workout globalize.js for number editing
-        amount: amount,
-        balance: parseFloat(data[5].replace(',','.'))
+        amount: parseIngCurrency(data[2]),
+        balance: parseIngCurrency(data[4])
     };
+}
+
+function parseIngCurrency(value) {
+    return parseFloat(value.replace('.', '').replace(',', '.'));
 }
 
 function parseCsvMovement(row) {
